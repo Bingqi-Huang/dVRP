@@ -12,3 +12,6 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2'  # id of GPUs
 ```
 cd ./Robust-VRP/Robust-TSP/TSP/RTSP
 python -m torch.distributed.launch --nproc_per_node=3 --master_port=11267 RTSP_train.py
+```
+
+Single GPU and multi-GPU are adjusted according to the scale and memory size, and the corresponding `RTSPTrainer.py`, `RTSP_train.py`, `utils.py` need to be modified.

@@ -11,7 +11,7 @@ import json
 import shutil
 
 process_start_time = datetime.now(pytz.timezone("Asia/Seoul"))
-result_folder = '../RCVRP/rcvrp_result/' + process_start_time.strftime("%Y%m%d_%H%M%S") + '{desc}'
+result_folder = '../Originial_CVRP/cvrp_result/' + process_start_time.strftime("%Y%m%d_%H%M%S") + '{desc}'
 
 
 def get_result_folder():

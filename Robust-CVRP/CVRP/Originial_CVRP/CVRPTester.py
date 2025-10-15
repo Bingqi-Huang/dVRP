@@ -46,8 +46,9 @@ class CVRPTester:
 
         # Load all problems into tensor
         self.logger.info(" *** Loading Saved Problems *** ")
-        saved_problem_filename = self.tester_params['saved_problem_filename']
-        self.all_depot_node_matrix, self.all_node_demand = load_problem_from_file(saved_problem_filename)
+        # TODO: use test data file
+        # saved_problem_filename = self.tester_params['saved_problem_filename']
+        # self.all_depot_node_matrix, self.all_node_demand = load_problem_from_file(saved_problem_filename)
 
         self.logger.info("Done. ")
 
@@ -86,17 +87,19 @@ class CVRPTester:
 
     def _test_one_batch(self, idx_start, idx_end):
         batch_size = idx_end - idx_start
-        depot_node_matrix_batched = self.all_depot_node_matrix[idx_start:idx_end]
-        node_demand_batched = self.all_node_demand[idx_start:idx_end]
+        # TODO: use test data file
+        # depot_node_matrix_batched = self.all_depot_node_matrix[idx_start:idx_end]
+        # node_demand_batched = self.all_node_demand[idx_start:idx_end]
 
-        # Augmentation
+        # # Augmentation
         if self.tester_params['augmentation_enable']:
             aug_factor = self.tester_params['aug_factor']
             batch_size = aug_factor * batch_size
+            # TODO: use test data file
             # (batch,problem+1,problem+1)--->(batch*aug_factor,problem+1,problem+1)
-            depot_node_matrix_batched = depot_node_matrix_batched.repeat(aug_factor,1,1)
+            # depot_node_matrix_batched = depot_node_matrix_batched.repeat(aug_factor,1,1)
             # (batch,problem+1)--->(batch*aug_factor,problem+1)
-            node_demand_batched = node_demand_batched.repeat(aug_factor,1)
+            # node_demand_batched = node_demand_batched.repeat(aug_factor,1)
 
         else:
             aug_factor = 1
@@ -104,8 +107,9 @@ class CVRPTester:
         # Ready
         self.model.eval()
         with torch.no_grad():
-            # self.env.load_problems(batch_size)
-            self.env.load_problems_manual( depot_node_matrix_batched,node_demand_batched)
+            self.env.load_problems(batch_size)
+            # TODO: use test data file
+            # self.env.load_problems_manual( depot_node_matrix_batched,node_demand_batched)
             reset_state, _, _ = self.env.reset()
             self.model.pre_forward(reset_state)
 

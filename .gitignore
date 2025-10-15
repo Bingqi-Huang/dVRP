@@ -1,0 +1,108 @@
+# ------------------------
+# Python 通用忽略项
+# ------------------------
+
+# 编译生成文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C 扩展
+*.so
+
+# 分发 / 打包
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 虚拟环境
+venv/
+env/
+ENV/
+.venv/
+.python-version
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# 单元测试 / 覆盖率
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# mypy / pytype / pyright
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+.pyright/
+
+# Cython 调试符号
+cython_debug/
+
+# ------------------------
+# 编辑器 / IDE
+# ------------------------
+
+# VSCode
+.vscode/
+
+# PyCharm / IntelliJ
+.idea/
+
+# ------------------------
+# 其他临时文件
+# ------------------------
+
+# 日志 / 临时文件
+*.log
+*.tmp
+*.temp
+
+# Mac / Linux / Windows 系统文件
+.DS_Store
+Thumbs.db
+
+# ------------------------
+# 项目特定可选忽略项（按需取消注释）
+# ------------------------
+
+# .env 文件（保存密钥时）
+# .env
+
+# Jupyter 输出文件
+# *.ipynb
+
+# 数据文件 / 模型权重
+*result/
+# data/
+# checkpoints/
+# outputs/
+# models/
+# logs/

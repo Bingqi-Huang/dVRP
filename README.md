@@ -15,3 +15,7 @@ python -m torch.distributed.launch --nproc_per_node=3 --master_port=11267 RTSP_t
 ```
 
 Single GPU and multi-GPU are adjusted according to the scale and memory size, and the corresponding `RTSPTrainer.py`, `RTSP_train.py`, `utils.py` need to be modified.
+
+# 补充
+
+数据和训练结果中，文件命名中的20、50是problem size，就是图中的节点数量。100、1000是每个点坐标取值范围的上限，但CVRP的问题定义文件里还没实现这个，固定取值上限是10。

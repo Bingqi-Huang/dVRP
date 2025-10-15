@@ -1,6 +1,7 @@
 # Machine Environment Config
 DEBUG_MODE = False
 USE_CUDA = not DEBUG_MODE
+# USE_CUDA = False
 CUDA_DEVICE_NUM = 2
 
 # Path Config
@@ -46,14 +47,17 @@ tester_params = {
     'use_cuda': USE_CUDA,
     'cuda_device_num': CUDA_DEVICE_NUM,
     'model_load': {
-        'path': './result/',  # directory path of pre-trained model and log files saved.
-        'epoch': 5000,  # epoch version of pre-trained model to laod.
+        'path': '/home/ty/dVRP/Robust-CVRP/CVRP/RCVRP/rcvrp_result/20251015_012927_train_cvrp20_100',  # directory path of pre-trained model and log files saved.
+        'epoch': 600,  # epoch version of pre-trained model to laod.
     },
-    'file_count': 10000,
-    'test_batch_size': 1000,
+    # 'saved_problem_folder': "../../Data/nominal_tsp/NmR-{}-{}".format(n,int_max),
+    # 'saved_problem_filename': 'R-20-1000-{}.txt',
+
+    'file_count': 1000,
+    'test_batch_size': 100,
     'augmentation_enable': True,
     'aug_factor': 8,
-    'aug_batch_size': 100,
+    'aug_batch_size': 800,
 }
 if tester_params['augmentation_enable']:
     tester_params['test_batch_size'] = tester_params['aug_batch_size']

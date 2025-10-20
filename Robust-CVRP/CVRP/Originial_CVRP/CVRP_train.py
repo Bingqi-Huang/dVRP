@@ -1,8 +1,8 @@
 # Machine Environment Config
 DEBUG_MODE = False
-USE_CUDA = not DEBUG_MODE
-# USE_CUDA = False
-CUDA_DEVICE_NUM = 2
+# USE_CUDA = not DEBUG_MODE
+USE_CUDA = True
+CUDA_DEVICE_NUM = 0
 
 # Path Config
 import os
@@ -16,8 +16,8 @@ from utils.utils import create_logger, copy_all_src
 from CVRPTrainer import CVRPTrainer as Trainer
 
 # parameters
-n = 20
-intmax = 100
+n = 50
+intmax = 10
 
 env_params = {
     'problem_size': n,
@@ -61,7 +61,7 @@ trainer_params = {
     'cuda_device_num': CUDA_DEVICE_NUM,
     # 'epochs': 2000,
     # 'train_episodes': 10*1000,
-    # 'train_batch_size': 200,
+    'train_batch_size': 1024,
     'epochs': 5000,
     'train_episodes': 10*100,
     'train_batch_size': 100,

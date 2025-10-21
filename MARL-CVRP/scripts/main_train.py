@@ -24,6 +24,8 @@ TRAINING_EPOCHS_P = 100
 TRAINING_EPOCHS_G = 100
 T_MAX = 200
 
+LEARNING_RATE_G = 5e-5
+
 class MetricsTracker:
     """Track and visualize training metrics."""
     

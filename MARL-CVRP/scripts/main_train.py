@@ -3,14 +3,14 @@ Main training script for MARL-CVRP using PSRO.
 """
 import sys
 import os
-# Add the project root directory to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
-
 
 import torch
 import numpy as np
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+from collections import defaultdict
 
 from env.dynamic_cvrp_env import DynamicCVRPEnv
 from agents.generator_agent import GeneratorAgent
@@ -22,20 +22,98 @@ from utils.data_structures import Hotspot
 NUM_ITERATIONS = 1000
 TRAINING_EPOCHS_P = 100
 TRAINING_EPOCHS_G = 100
-T_MAX = 200 # Max steps per episode
+T_MAX = 200
+
+class MetricsTracker:
+    """Track and visualize training metrics."""
+    
+    def __init__(self):
+        self.metrics = defaultdict(list)
+    
+    def log(self, **kwargs):
+        """Log metrics for current iteration."""
+        for key, value in kwargs.items():
+            self.metrics[key].append(value)
+    
+    def plot(self, save_path='training_curves.png'):
+        """Plot all metrics."""
+        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+        fig.suptitle('MARL-CVRP Training Metrics', fontsize=16)
+        
+        # Plot 1: Generator Reward
+        if 'generator_reward' in self.metrics:
+            axes[0, 0].plot(self.metrics['generator_reward'], label='Generator')
+            axes[0, 0].set_xlabel('Iteration')
+            axes[0, 0].set_ylabel('Avg Reward')
+            axes[0, 0].set_title('Generator Reward (Regret)')
+            axes[0, 0].legend()
+            axes[0, 0].grid(True)
+        
+        # Plot 2: Planner Reward
+        if 'planner_reward' in self.metrics:
+            axes[0, 1].plot(self.metrics['planner_reward'], label='Planner', color='orange')
+            axes[0, 1].set_xlabel('Iteration')
+            axes[0, 1].set_ylabel('Avg Reward')
+            axes[0, 1].set_title('Planner Reward (-Regret)')
+            axes[0, 1].legend()
+            axes[0, 1].grid(True)
+        
+        # Plot 3: Service Rate
+        if 'service_rate' in self.metrics:
+            axes[0, 2].plot(self.metrics['service_rate'], label='Service Rate', color='green')
+            axes[0, 2].set_xlabel('Iteration')
+            axes[0, 2].set_ylabel('Rate (%)')
+            axes[0, 2].set_title('Demand Service Rate')
+            axes[0, 2].legend()
+            axes[0, 2].grid(True)
+        
+        # Plot 4: Failed Demands
+        if 'failed_demands' in self.metrics:
+            axes[1, 0].plot(self.metrics['failed_demands'], label='Failed', color='red')
+            axes[1, 0].set_xlabel('Iteration')
+            axes[1, 0].set_ylabel('Count')
+            axes[1, 0].set_title('Failed Demands per Episode')
+            axes[1, 0].legend()
+            axes[1, 0].grid(True)
+        
+        # Plot 5: Total Demands Generated
+        if 'total_demands' in self.metrics:
+            axes[1, 1].plot(self.metrics['total_demands'], label='Total Demands', color='purple')
+            axes[1, 1].set_xlabel('Iteration')
+            axes[1, 1].set_ylabel('Count')
+            axes[1, 1].set_title('Total Demands Generated')
+            axes[1, 1].legend()
+            axes[1, 1].grid(True)
+        
+        # Plot 6: Nash Gap (if both rewards tracked)
+        if 'generator_reward' in self.metrics and 'planner_reward' in self.metrics:
+            # Nash gap: sum of regrets (should converge to stable value)
+            nash_gap = [g + p for g, p in zip(self.metrics['generator_reward'], 
+                                               self.metrics['planner_reward'])]
+            axes[1, 2].plot(nash_gap, label='Nash Gap', color='brown')
+            axes[1, 2].set_xlabel('Iteration')
+            axes[1, 2].set_ylabel('Gap')
+            axes[1, 2].set_title('Nash Equilibrium Gap')
+            axes[1, 2].legend()
+            axes[1, 2].grid(True)
+        
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150)
+        print(f"📊 Training curves saved to: {save_path}")
+        plt.close()
+
 
 def main():
     """
     Main PSRO training loop.
     """
-    # --- START GPU/CPU DEVICE SETUP ---
+    # --- Device Setup ---
     if torch.cuda.is_available():
         device = torch.device("cuda")
         print(f"Using GPU: {torch.cuda.get_device_name(0)}")
     else:
         device = torch.device("cpu")
         print("Using CPU")
-    # --- END DEVICE SETUP ---
 
     # Create checkpoint directories
     checkpoint_dir = os.path.join(project_root, 'checkpoints')
@@ -46,37 +124,34 @@ def main():
     policy_pool_P = PolicyPool(save_dir=os.path.join(checkpoint_dir, 'planner'))
     policy_pool_G = PolicyPool(save_dir=os.path.join(checkpoint_dir, 'generator'))
 
-    # Initialize agents with starting policies
+    # Initialize metrics tracker
+    tracker = MetricsTracker()
+
+    # Initialize agents
     initial_planner = PlannerAgent()
     initial_generator = GeneratorAgent(device=device)
     
     # Add initial generator to pool
     policy_pool_G.add(initial_generator, metadata={'iteration': 0, 'avg_reward': 0.0})
-    
-    # Define static hotspots for the generator (convert to proper coordinates in [0,1])
-    hotspots = [
-        Hotspot(location=(0.1, 0.1)),
-        Hotspot(location=(0.9, 0.9)),
-        Hotspot(location=(0.1, 0.9)),
-        Hotspot(location=(0.9, 0.1)),
-        Hotspot(location=(0.5, 0.5))
-    ]
-
 
     for iteration in range(NUM_ITERATIONS):
-        print(f"\n--- PSRO Iteration {iteration+1}/{NUM_ITERATIONS} ---")
+        print(f"\n{'='*70}")
+        print(f"PSRO Iteration {iteration+1}/{NUM_ITERATIONS}")
+        print(f"{'='*70}")
 
-        # --- 1. Train Planner vs. Fixed Generator ---
-        print("--- Training Planner (Agent P) ---")
+        # ====================================================
+        # PHASE 1: Train Planner vs. Fixed Generator
+        # ====================================================
+        print("\n[Phase 1] Training Planner...")
         
-        # Load fixed generator from pool
+        # Load fixed generator
         if policy_pool_G.size() > 0:
             fixed_policy_G = GeneratorAgent(device=device)
             fixed_policy_G.load(policy_pool_G.sample_latest())
         else:
             fixed_policy_G = GeneratorAgent(device=device)
         
-        current_policy_P = PlannerAgent() # Train a new planner from scratch
+        current_policy_P = PlannerAgent()
 
         planner_rewards = []
         for ep in range(TRAINING_EPOCHS_P):
@@ -91,7 +166,6 @@ def main():
                 
                 next_state, delta_regret, done = env.step(action_P, action_G)
                 
-                # Planner's goal is to MINIMIZE regret, so its reward is -delta_regret
                 reward_P = -delta_regret
                 episode_reward += reward_P
                 
@@ -105,35 +179,34 @@ def main():
             'iteration': iteration + 1, 
             'avg_reward': avg_planner_reward
         })
-        print(f"Planner training complete. Avg reward: {avg_planner_reward:.2f}")
+        print(f"  ✓ Planner Avg Reward: {avg_planner_reward:.2f}")
 
-        # --- 2. Train Generator vs. Fixed Planner ---
-        print("--- Training Generator (Agent G) ---")
+        # ====================================================
+        # PHASE 2: Train Generator vs. Fixed Planner
+        # ====================================================
+        print("\n[Phase 2] Training Generator...")
         
-        # Load fixed planner from policy pool
         if policy_pool_P.size() > 0:
-            fixed_policy_P = PlannerAgent()
-            # Note: PlannerAgent doesn't have load() yet, so using latest trained one
-            fixed_policy_P = current_policy_P  # Use the one we just trained
+            fixed_policy_P = current_policy_P  # Use just-trained planner
         else:
             fixed_policy_P = PlannerAgent()
 
         current_policy_G = GeneratorAgent(device=device)
 
-        # --- LOGGING FOR GENERATOR TRAINING ---
-        print("  Epoch | Avg Episode Cost | Avg Failed Demands | Avg Service Rate")
         generator_rewards = []
+        total_failed_demands = []
+        total_demands_created = []
+        service_rates = []
         
         for ep in range(TRAINING_EPOCHS_G):
             state = env.reset()
             
-            # Reset generator's episode memory
+            # Reset generator memory
             current_policy_G.saved_log_probs = []
             current_policy_G.rewards = []
             
-            # --- METRIC TRACKING ---
-            total_episode_cost = 0
-            total_demands_generated = 0
+            episode_cost = 0
+            demands_created = 0
             
             for t in range(T_MAX):
                 with torch.no_grad():
@@ -141,40 +214,75 @@ def main():
                 
                 action_G, log_prob_G = current_policy_G.choose_action(state, deterministic=False)
                 
-                # Track generated demands
-                total_demands_generated += len(action_G.new_demands)
+                demands_created += len(action_G.new_demands)
 
                 next_state, delta_regret, done = env.step(action_P, action_G)
                 
-                # Accumulate cost
-                total_episode_cost += delta_regret
-
-                # Generator's goal is to MAXIMIZE regret, so its reward is +delta_regret
+                episode_cost += delta_regret
                 current_policy_G.store_reward(delta_regret)
                 
                 state = next_state
                 if done: break
             
-            # Update generator at end of episode
-            loss = current_policy_G.update()
-            generator_rewards.append(total_episode_cost)
-            
-            # --- CALCULATE AND LOG END-OF-EPISODE METRICS ---
-            # Count failed demands at the end of the episode
-            failed_demands_count = len(state.failed_demands)
+            # Episode metrics
+            failed_count = len(state.failed_demands)
             serviced_count = len(state.serviced_demands)
+            service_rate = serviced_count / demands_created if demands_created > 0 else 1.0
             
-            service_rate = (serviced_count / total_demands_generated) if total_demands_generated > 0 else 1.0
-
-            if (ep + 1) % 10 == 0: # Log every 10 epochs
-                print(f"  {ep+1:^5} | {total_episode_cost:^18.2f} | {failed_demands_count:^20} | {service_rate:^18.2%}")
+            generator_rewards.append(episode_cost)
+            total_failed_demands.append(failed_count)
+            total_demands_created.append(demands_created)
+            service_rates.append(service_rate)
+            
+            # Update generator
+            loss = current_policy_G.update()
 
         avg_generator_reward = np.mean(generator_rewards)
+        avg_failed = np.mean(total_failed_demands)
+        avg_service_rate = np.mean(service_rates) * 100
+        avg_demands = np.mean(total_demands_created)
+        
         policy_pool_G.add(current_policy_G, metadata={
             'iteration': iteration + 1,
             'avg_reward': avg_generator_reward
         })
-        print(f"Generator training complete. Avg reward: {avg_generator_reward:.2f}")
+        
+        print(f"  ✓ Generator Avg Reward: {avg_generator_reward:.2f}")
+        print(f"  ✓ Avg Failed Demands: {avg_failed:.1f}")
+        print(f"  ✓ Avg Service Rate: {avg_service_rate:.1f}%")
+        print(f"  ✓ Avg Total Demands: {avg_demands:.1f}")
+
+        # ====================================================
+        # Log Metrics
+        # ====================================================
+        tracker.log(
+            generator_reward=avg_generator_reward,
+            planner_reward=avg_planner_reward,
+            failed_demands=avg_failed,
+            service_rate=avg_service_rate,
+            total_demands=avg_demands
+        )
+
+        # ====================================================
+        # Periodic Evaluation & Plotting
+        # ====================================================
+        if (iteration + 1) % 10 == 0:
+            print(f"\n{'='*70}")
+            print(f"📈 Checkpoint at Iteration {iteration+1}")
+            print(f"{'='*70}")
+            print(f"  Generator Reward Trend: {tracker.metrics['generator_reward'][-10:]}")
+            print(f"  Planner Reward Trend: {tracker.metrics['planner_reward'][-10:]}")
+            print(f"  Service Rate Trend: {[f'{x:.1f}%' for x in tracker.metrics['service_rate'][-10:]]}")
+            
+            # Plot training curves
+            tracker.plot(save_path=os.path.join(checkpoint_dir, f'training_curves_iter{iteration+1}.png'))
+
+    print("\n" + "="*70)
+    print("✅ Training Complete!")
+    print("="*70)
+    
+    # Final plot
+    tracker.plot(save_path=os.path.join(checkpoint_dir, 'final_training_curves.png'))
 
 
 if __name__ == "__main__":

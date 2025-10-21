@@ -16,7 +16,7 @@ class PlannerAgent:
     Goal: Minimize operational cost and failed demands.
     
     Current Implementation: Greedy nearest-neighbor heuristic
-    Future: Replace with neural network policy (AM/POMO style)
+    TODO: Replace with neural network policy (AM/POMO style)
     """
     
     def __init__(self):

@@ -102,7 +102,7 @@ Thumbs.db
 # 数据文件 / 模型权重
 *result/
 # data/
-# checkpoints/
+**/checkpoints/
 # outputs/
 # models/
 # logs/

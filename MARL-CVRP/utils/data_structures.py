@@ -1,46 +1,47 @@
 """
-Contains all core data structures for the project based on the guide.
-These structures define the state and action spaces for the agents and environment.
+Data structures for the Dynamic CVRP environment.
 """
-from dataclasses import dataclass
-from typing import List, Dict
+from dataclasses import dataclass, field
+from typing import List, Tuple, Optional
 
-# --- Entities ---
 @dataclass
-class VehicleState:
+class Vehicle:
+    """Represents a delivery vehicle."""
     id: int
-    location: tuple  # (x, y)
+    location: Tuple[float, float]  # (x, y) coordinates in [0, 1]
     remaining_capacity: float
-    current_plan: List[int]  # Next H-step demand IDs
+    current_plan: List[int] = field(default_factory=list)  # List of demand IDs to visit
 
 @dataclass
-class DemandState:
+class Demand:
+    """Represents a customer demand."""
     id: int
-    location: tuple  # (x, y)
+    location: Tuple[float, float]  # (x, y) coordinates in [0, 1]
     quantity: float
-    arrival_time: int
-    deadline: int
-    status: str  # 'pending', 'serviced', 'failed'
+    arrival_time: int  # Timestep when demand appeared
+    deadline: int      # Timestep by which demand must be serviced
+    status: str = 'pending'  # 'pending', 'serviced', 'failed'
 
 @dataclass
 class Hotspot:
-    id: int
-    location: tuple  # GMM center (x, y)
+    """Represents a potential location for new demands (used by Generator)."""
+    location: Tuple[float, float]  # (x, y) coordinates in [0, 1]
 
-# --- State & Actions ---
 @dataclass
 class GlobalState:
+    """Complete state of the DVRP system at a timestep."""
     current_time: int
-    vehicles: List[VehicleState]
-    pending_demands: List[DemandState]
-    # Note: Hotspots are considered static and passed separately to the agent
-
-@dataclass
-class PlannerAction:
-    # Key is vehicle_id, value is the H-step route for that vehicle
-    vehicle_routes: Dict[int, List[int]]
+    vehicles: List[Vehicle]
+    pending_demands: List[Demand]
+    serviced_demands: List[Demand] = field(default_factory=list)
+    failed_demands: List[Demand] = field(default_factory=list)
 
 @dataclass
 class GeneratorAction:
-    # List of new demands to be added to the environment
-    new_demands: List[DemandState]
+    """Action taken by the Generator agent."""
+    new_demands: List[Demand]  # List of demands to introduce this timestep
+
+@dataclass
+class PlannerAction:
+    """Action taken by the Planner agent."""
+    vehicle_plans: dict  # {vehicle_id: [demand_id_1, demand_id_2, ...]}

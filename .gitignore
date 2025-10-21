@@ -33,7 +33,7 @@ MANIFEST
 
 # 虚拟环境
 venv/
-env/
+
 ENV/
 .venv/
 .python-version

@@ -1,257 +1,310 @@
 """
 Generator Agent: Creates adversarial demand scenarios.
-Uses AdversarialTransformer to decide where, how much, and when to place demands.
+In this refactored version, it generates a complete instance offline using
+an autoregressive neural network model.
 """
 import torch
-import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 from typing import List, Tuple
-import numpy as np
+import random
 
-from model.adversarial_transformer import AdversarialTransformer
-from utils.data_structures import GlobalState, GeneratorAction, Demand, Hotspot
+from utils.data_structures import Demand
+from model.autoregressive_generator import AutoregressiveGeneratorModel
 
 
 class GeneratorAgent:
     """
     The adversarial agent that generates challenging demand scenarios.
-    Goal: Maximize the regret (difficulty) for the Planner.
+    This version uses a learned autoregressive model for generation.
     """
     
     def __init__(
         self,
-        embed_dim: int = 128,
-        num_heads: int = 8,
-        num_layers: int = 3,
+        d_model: int = 128,
+        nhead: int = 4,
+        num_decoder_layers: int = 2,
         learning_rate: float = 1e-4,
-        max_capacity: float = 100.0,
         min_deadline_delay: float = 5.0,
         max_deadline_delay: float = 50.0,
-        max_demands_per_step: int = 3,
+        baseline_alpha: float = 0.9,
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     ):
-        """
-        Args:
-            embed_dim: Transformer embedding dimension
-            num_heads: Number of attention heads
-            num_layers: Number of transformer layers
-            learning_rate: Optimizer learning rate
-            max_capacity: Maximum vehicle capacity
-            min_deadline_delay: Minimum time until deadline
-            max_deadline_delay: Maximum time until deadline
-            max_demands_per_step: Maximum demands to generate per timestep
-            device: 'cuda' or 'cpu'
-        """
         self.device = device
-        self.max_demands_per_step = max_demands_per_step
-        self.max_capacity = max_capacity
         self.min_deadline_delay = min_deadline_delay
         self.max_deadline_delay = max_deadline_delay
+        self.next_demand_id = 0
         
-        # Initialize model
-        self.model = AdversarialTransformer(
-            embed_dim=embed_dim,
-            num_heads=num_heads,
-            num_layers=num_layers,
-            max_capacity=max_capacity,
-            min_deadline_delay=min_deadline_delay,
-            max_deadline_delay=max_deadline_delay
+        # Initialize the autoregressive model
+        print(f"Initializing model on device: {device}")
+        self.model = AutoregressiveGeneratorModel(
+            d_model=d_model,
+            nhead=nhead,
+            num_decoder_layers=num_decoder_layers
         ).to(device)
         
-        # Optimizer
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         
-        # Episode memory for REINFORCE
+        # Baseline for REINFORCE
+        self.reward_baseline = 0.0
+        self.baseline_alpha = baseline_alpha
+        
+        # Store for REINFORCE updates
         self.saved_log_probs = []
-        self.rewards = []
-        
-        # Next demand ID counter
-        self.next_demand_id = 0
-    
-    def _generate_hotspots(self, state: GlobalState, num_hotspots: int = 10) -> List[Hotspot]:
-        """
-        Generate candidate hotspot locations for placing demands.
-        
-        Strategy:
-        - Mix of random locations
-        - Locations far from current vehicles (exploitation)
-        - Locations near pending demands (clustering)
-        
-        Args:
-            state: Current global state
-            num_hotspots: Number of candidate locations
-            
-        Returns:
-            List of Hotspot objects
-        """
-        hotspots = []
-        
-        # Strategy 1: Random locations (50%)
-        num_random = num_hotspots // 2
-        for _ in range(num_random):
-            loc = (np.random.uniform(0, 1), np.random.uniform(0, 1))
-            hotspots.append(Hotspot(location=loc))
-        
-        # Strategy 2: Far from vehicles (25%)
-        if state.vehicles:
-            num_far = num_hotspots // 4
-            vehicle_locs = [v.location for v in state.vehicles]
-            for _ in range(num_far):
-                # Sample random location and keep if far from vehicles
-                best_loc = None
-                best_dist = 0
-                for _ in range(5):  # Try 5 candidates
-                    loc = (np.random.uniform(0, 1), np.random.uniform(0, 1))
-                    min_dist = min(
-                        np.sqrt((loc[0] - v[0])**2 + (loc[1] - v[1])**2)
-                        for v in vehicle_locs
-                    )
-                    if min_dist > best_dist:
-                        best_dist = min_dist
-                        best_loc = loc
-                if best_loc:
-                    hotspots.append(Hotspot(location=best_loc))
-        
-        # Strategy 3: Near pending demands (25%)
-        if state.pending_demands:
-            num_cluster = num_hotspots - len(hotspots)
-            demand_locs = [d.location for d in state.pending_demands]
-            for _ in range(num_cluster):
-                # Pick random demand and add noise
-                base_loc = demand_locs[np.random.randint(len(demand_locs))]
-                noise = np.random.normal(0, 0.1, 2)
-                loc = (
-                    np.clip(base_loc[0] + noise[0], 0, 1),
-                    np.clip(base_loc[1] + noise[1], 0, 1)
-                )
-                hotspots.append(Hotspot(location=loc))
-        
-        # Fill remaining with random
-        while len(hotspots) < num_hotspots:
-            loc = (np.random.uniform(0, 1), np.random.uniform(0, 1))
-            hotspots.append(Hotspot(location=loc))
-        
-        return hotspots[:num_hotspots]
-    
-    def choose_action(
+
+    def generate_instance(
         self, 
-        state: GlobalState, 
-        deterministic: bool = False
-    ) -> Tuple[GeneratorAction, torch.Tensor]:
+        num_demands: int, 
+        episode_length: int, 
+        max_quantity: float, 
+        map_size: Tuple[float, float] = (1.0, 1.0),
+        random_seed: int = None
+    ) -> List[Demand]:
         """
-        Generate new demands for the current timestep.
+        Generates a complete instance using the autoregressive model.
+        Falls back to random generation for testing or if the model fails.
         
         Args:
-            state: Current global state
-            deterministic: If True, use greedy action selection
-            
-        Returns:
-            action: GeneratorAction with list of new demands
-            log_prob: Log probability of the action (for REINFORCE)
+            num_demands: Number of demands to generate
+            episode_length: Maximum episode length
+            max_quantity: Maximum demand quantity
+            map_size: Environment dimensions
+            random_seed: Optional seed for reproducibility
         """
-        # Generate hotspot candidates
-        hotspots = self._generate_hotspots(state, num_hotspots=10)
+        # Clear the saved log probs from any previous instance
+        self.saved_log_probs = []
         
-        # Decide how many demands to generate (random for now)
-        # TODO: Could make this learnable too
-        num_demands = np.random.randint(1, self.max_demands_per_step + 1)
+        # If a random seed is provided, set it
+        if random_seed is not None:
+            torch.manual_seed(random_seed)
+            random.seed(random_seed)
         
-        new_demands = []
-        total_log_prob = torch.tensor(0.0, device=self.device)
+        try:
+            return self._generate_with_model(num_demands, episode_length, max_quantity, map_size)
+        except Exception as e:
+            print(f"Neural model generation failed with: {e}")
+            print("Falling back to random generation...")
+            return self._generate_randomly(num_demands, episode_length, max_quantity, map_size)
+
+    def _generate_with_model(
+        self, 
+        num_demands: int, 
+        episode_length: int, 
+        max_quantity: float, 
+        map_size: Tuple[float, float]
+    ) -> List[Demand]:
+        """Generate using the neural model with careful numerical handling."""
+        demand_schedule = []
         
-        for _ in range(num_demands):
-            # Sample action from model
-            hotspot_idx_t, quantity_t, deadline_delay_t, log_prob_t = self.model.sample_action(
-                states=[state],
-                hotspots=[hotspots],
-                deterministic=deterministic
-            )
+        # Start with the [SOS] token
+        current_sequence = self.model.sos_token.clone().to(self.device)
+        
+        # Track cumulative arrival time
+        last_arrival_time = 0.0
+        
+        # Enable evaluation mode during generation
+        self.model.eval()
+        
+        with torch.no_grad():
+            for i in range(num_demands):
+                # Get distribution parameters for the next demand
+                outputs = self.model(current_sequence)
+                
+                # --- Sample values using the normal distribution ---
+                # Location (x, y)
+                loc_dist = torch.distributions.Normal(
+                    outputs['loc_mu'], outputs['loc_std']
+                )
+                loc = loc_dist.sample().clamp(0.0, 1.0)
+                
+                # Quantity
+                qty_dist = torch.distributions.Normal(
+                    outputs['qty_mu'], outputs['qty_std']
+                )
+                qty = qty_dist.sample().clamp(0.0, 1.0)
+                
+                # Arrival delta (time between demands)
+                arrival_dist = torch.distributions.Normal(
+                    outputs['arrival_mu'], outputs['arrival_std']
+                )
+                arrival_delta = arrival_dist.sample().clamp(0.1, 10.0)
+                
+                # Deadline delay
+                deadline_dist = torch.distributions.Normal(
+                    outputs['deadline_mu'], outputs['deadline_std']
+                )
+                deadline_delay = deadline_dist.sample().clamp(
+                    self.min_deadline_delay, self.max_deadline_delay
+                )
+                
+                # --- Calculate log probabilities ---
+                log_prob = (
+                    loc_dist.log_prob(loc).sum() +
+                    qty_dist.log_prob(qty).sum() +
+                    arrival_dist.log_prob(arrival_delta).sum() +
+                    deadline_dist.log_prob(deadline_delay).sum()
+                )
+                self.saved_log_probs.append(log_prob)
+                
+                # --- Create the demand object ---
+                current_arrival_time = last_arrival_time + arrival_delta.item()
+                current_arrival_time = round(current_arrival_time)
+                
+                # Stop if we've exceeded the episode length
+                if current_arrival_time >= episode_length:
+                    break
+                
+                # Scale quantity to desired range
+                scaled_qty = 1.0 + qty.item() * (max_quantity - 1.0)
+                
+                # Calculate deadline
+                current_deadline = min(
+                    int(current_arrival_time + deadline_delay.item()),
+                    episode_length
+                )
+                
+                # Create demand
+                demand = Demand(
+                    id=self.next_demand_id,
+                    location=(
+                        loc[0, 0].item() * map_size[0], 
+                        loc[0, 1].item() * map_size[1]
+                    ),
+                    quantity=scaled_qty,
+                    arrival_time=current_arrival_time,
+                    deadline=current_deadline,
+                    status='scheduled'
+                )
+                
+                demand_schedule.append(demand)
+                self.next_demand_id += 1
+                last_arrival_time = current_arrival_time
+                
+                # --- Prepare the next input for the model ---
+                # Normalize and embed the demand properties
+                next_input = torch.tensor([[
+                    loc[0, 0].item(),
+                    loc[0, 1].item(),
+                    qty.item(),
+                    arrival_delta.item() / 10.0,  # Scale for numerical stability
+                    deadline_delay.item() / 50.0  # Scale for numerical stability
+                ]], device=self.device)
+                
+                next_input_embedded = self.model.input_embedder(next_input).unsqueeze(0)
+                current_sequence = torch.cat([current_sequence, next_input_embedded], dim=1)
+        
+        # Re-enable training mode
+        self.model.train()
+        
+        return demand_schedule
+
+    def _generate_randomly(
+        self, 
+        num_demands: int, 
+        episode_length: int, 
+        max_quantity: float, 
+        map_size: Tuple[float, float]
+    ) -> List[Demand]:
+        """Fallback random generator for testing and robustness."""
+        demand_schedule = []
+        last_arrival_time = 0
+        
+        for i in range(num_demands):
+            # Add a random delta to the previous arrival time
+            arrival_delta = random.randint(0, 5)
+            arrival_time = last_arrival_time + arrival_delta
             
-            # Extract scalar values for creating the Demand object
-            hotspot_idx = hotspot_idx_t.item()
-            quantity = quantity_t.item()
-            deadline_delay = deadline_delay_t.item()
+            # Stop if we exceed the episode length
+            if arrival_time >= episode_length:
+                break
+                
+            # Generate deadline as arrival_time + a random delay
+            deadline_delay = random.uniform(self.min_deadline_delay, self.max_deadline_delay)
+            deadline = min(int(arrival_time + deadline_delay), episode_length)
             
-            # Create demand
-            selected_hotspot = hotspots[hotspot_idx]
+            # Create the demand
             demand = Demand(
                 id=self.next_demand_id,
-                location=selected_hotspot.location,
-                quantity=quantity,
-                arrival_time=state.current_time,
-                deadline=state.current_time + int(deadline_delay),
-                status='pending'
+                location=(random.uniform(0, map_size[0]), random.uniform(0, map_size[1])),
+                quantity=random.uniform(1.0, max_quantity),
+                arrival_time=arrival_time,
+                deadline=deadline,
+                status='scheduled'
             )
             
-            new_demands.append(demand)
-            # FIXED: Accumulate the log_prob TENSOR to maintain the computation graph
-            total_log_prob = total_log_prob + log_prob_t.squeeze()
+            demand_schedule.append(demand)
             self.next_demand_id += 1
+            last_arrival_time = arrival_time
         
-        action = GeneratorAction(new_demands=new_demands)
+        # Clear any saved log probs since we're not using the model
+        self.saved_log_probs = []
         
-        # Store for REINFORCE update
-        if not deterministic:
-            self.saved_log_probs.append(total_log_prob)
-        
-        return action, total_log_prob
-    
-    def store_reward(self, reward: float):
+        return demand_schedule
+
+    def update(self, final_planner_performance: float) -> float:
         """
-        Store reward for the last action (called by training loop).
+        Update policy using REINFORCE with a baseline.
+        Falls back gracefully if no valid log probs are available.
         
         Args:
-            reward: Reward value (typically +delta_regret for Generator)
+            final_planner_performance: Score where higher means the instance was harder
+        
+        Returns:
+            The calculated loss or 0.0 if no update was performed
         """
-        self.rewards.append(reward)
-    
-    def update(self):
-        """
-        Update policy using REINFORCE algorithm.
-        Should be called at end of episode.
-        """
-        if not self.saved_log_probs or not self.rewards:
+        # If we have no log probs (used random generation), just update the baseline
+        if not self.saved_log_probs:
+            self.reward_baseline = (self.baseline_alpha * self.reward_baseline + 
+                                  (1 - self.baseline_alpha) * final_planner_performance)
+            print(f"Generator received score: {final_planner_performance:.2f} (no update)")
             return 0.0
-        
-        # Convert to tensors
-        rewards = torch.tensor(self.rewards, device=self.device)
-        log_probs = torch.stack(self.saved_log_probs)
-        
-        # Compute returns (discounted cumulative rewards)
-        # For simplicity, using sum of rewards (no discounting)
-        # TODO: Add discount factor gamma
-        returns = rewards.sum()
-        
-        # Normalize returns (optional, helps stability)
-        if len(self.rewards) > 1:
-            returns = (returns - rewards.mean()) / (rewards.std() + 1e-8)
-        
-        # Policy gradient loss
-        policy_loss = -(log_probs * returns).sum()
-        
-        # Update
-        self.optimizer.zero_grad()
-        policy_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-        self.optimizer.step()
-        
-        # Clear episode memory
-        self.saved_log_probs = []
-        self.rewards = []
-        
-        return policy_loss.item()
+            
+        try:
+            # Calculate advantage
+            advantage = final_planner_performance - self.reward_baseline
+            
+            # Calculate policy gradient loss
+            loss = 0
+            for log_prob in self.saved_log_probs:
+                loss -= log_prob * advantage
+            
+            # Update model
+            self.optimizer.zero_grad()
+            loss.backward()
+            
+            # Add gradient clipping for stability
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            
+            self.optimizer.step()
+            
+            # Update the baseline
+            self.reward_baseline = (self.baseline_alpha * self.reward_baseline + 
+                                  (1 - self.baseline_alpha) * final_planner_performance)
+            
+            # Clear saved log probs
+            self.saved_log_probs = []
+            
+            print(f"Generator updated with score: {final_planner_performance:.2f}, loss: {loss.item():.4f}")
+            return loss.item()
+            
+        except Exception as e:
+            print(f"Update failed: {e}")
+            self.saved_log_probs = []
+            return 0.0
     
     def save(self, filepath: str):
-        """Save model weights."""
+        """Save agent state."""
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'next_demand_id': self.next_demand_id
+            'next_demand_id': self.next_demand_id,
+            'reward_baseline': self.reward_baseline
         }, filepath)
     
     def load(self, filepath: str):
-        """Load model weights."""
+        """Load agent state."""
         checkpoint = torch.load(filepath, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        self.next_demand_id = checkpoint['next_demand_id']
+        self.next_demand_id = checkpoint.get('next_demand_id', 0)
+        self.reward_baseline = checkpoint.get('reward_baseline', 0.0)

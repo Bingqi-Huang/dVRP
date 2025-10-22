@@ -9,11 +9,12 @@ env:
 
 # Generator settings
 generator:
-  # TODO： This threshold value MUST be tune based on actual planner performance metrics.
   acl_threshold: 0.1 # Example threshold for difficulty update
   # TODO: Design this difficulty representation based on actual environment parameters.
   initial_difficulty:
     lambda: 0.1 # Example: demand arrival rate (poisson)
+  min_demand_quantity: 1
+  max_demand_quantity: 10
 
 # Planner Agent settings
 planner:

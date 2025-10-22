@@ -28,6 +28,7 @@ class State:
 @dataclass
 class DemandScriptEntry:
     """Represents a single line in the offline generated demand script."""
+    # TODO: Consider adding more fields if necessary.
     arrival_time: int
     location: Tuple[float, float]
     quantity: int

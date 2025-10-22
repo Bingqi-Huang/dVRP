@@ -60,7 +60,10 @@ class CurriculumGenerator:
                 
                 # Generate other demand properties
                 location = tuple(np.random.rand(2) * self.env_config.map_size) # Random location within map
-                quantity = np.random.randint(1, 10) # TODO: make this config parameter writtin in config.yaml and read here.
+                quantity = np.random.randint(
+                    self.gen_config.min_demand_quantity, 
+                    self.gen_config.max_demand_quantity + 1
+                )
 
                 script.append(DemandScriptEntry(
                     arrival_time=arrival_time,

@@ -29,14 +29,15 @@ def visualize_script(script: List[DemandScriptEntry], env_config: EnvConfig, tit
         locations[:, 0], 
         locations[:, 1], 
         c=arrival_times, 
-        cmap='viridis', 
+        cmap='cividis', 
         s=60, 
         label='Demands'
     )
     
-    # Add text labels for the order of arrival
+    # Add text labels for the order of arrival and quantity
     for i, loc in enumerate(locations):
-        plt.text(loc[0] + 1, loc[1] + 1, str(i + 1), fontsize=9, ha='center')
+        # Display format: "Order (Quantity)"
+        plt.text(loc[0] + 1, loc[1] + 1, f"{i + 1} ({script[i].quantity})", fontsize=9, ha='center')
         
     # Add a colorbar to show the time scale
     cbar = plt.colorbar(scatter)

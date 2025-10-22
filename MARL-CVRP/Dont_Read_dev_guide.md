@@ -287,3 +287,43 @@ robust_dvrp_project/
 
 **Step 5: Advanced Components (`env/`)**
 *   **`env/regret_oracle.py`**: Create a placeholder for the `RegretOracle` to calculate step-wise rewards. This can be integrated later with a dedicated CVRP solver.
+
+---
+
+### **Solving Part of TODOs: Next Development Focus**
+
+This section outlines the high-level plan for addressing the immediate TODOs related to demand generation and curriculum difficulty.
+
+#### **[DONE]1. Demand Quantity Configuration**
+
+**Goal:** To make the range for generating demand quantities configurable, rather than hardcoded.
+
+**High-Level Guidance:**
+
+1.  **Configuration File Update:** Add two new parameters, `min_demand_quantity` and `max_demand_quantity`, to the `generator` section within `configs/base_config.yaml`. These will define the lower and upper bounds for the quantity of a single demand.
+2.  **Config Class Update:** Modify the `GeneratorConfig` dataclass in `utils/config.py` to include these new `min_demand_quantity` and `max_demand_quantity` fields. This ensures they are correctly loaded from the YAML.
+3.  **Generator Logic Update:** In the `_generate_single_script` method of `env/curriculum_generator.py`, replace the hardcoded `np.random.randint(1, 10)` with a call that uses the newly configured `self.gen_config.min_demand_quantity` and `self.gen_config.max_demand_quantity`. Remember that `np.random.randint` is exclusive on the high end.
+
+#### **[TO BE DETERMINED]2. CurriculumGenerator Difficulty Design & Update Logic**
+
+**Goal:** To enhance the `CurriculumGenerator` by introducing more dimensions to problem difficulty and refining how these difficulties are updated based on planner performance.
+
+**High-Level Guidance:**
+
+1.  **Expand Difficulty Parameters:**
+    *   **Identify New Dimensions:** Beyond just `lambda` (demand arrival rate), consider adding parameters that influence the spatial distribution of demands. A good candidate is `demand_spatial_spread`, which could control how clustered or dispersed demands are on the map.
+    *   **Configuration File Update:** Add `demand_spatial_spread` (and any other chosen new parameters) to the `generator.initial_difficulty` section in `configs/base_config.yaml` with appropriate initial values.
+    *   **Config Class Update:** Ensure the `initial_difficulty` dictionary in `GeneratorConfig` (within `utils/config.py`) is prepared to handle these new keys。
+
+2.  **Utilize New Parameters in Script Generation (`_generate_single_script`):**
+    *   **Location Generation:** Modify the demand `location` generation logic in `env/curriculum_generator.py`. Instead of a uniform random distribution, use a Gaussian (normal) distribution centered on the map, with its standard deviation controlled by the `demand_spatial_spread` parameter. Remember to clip the generated coordinates to stay within the `map_size` boundaries.
+    *   *(Note: Parameters like `vehicle_capacity_factor` or `num_vehicles_factor` would typically influence the `DvrpEnv`'s initialization rather than script generation directly. These can be considered for later, more advanced difficulty control.)*
+
+3.  **Refine Difficulty Update Logic (`update_difficulty`):**
+    *   **Clarify Performance Metric:** Before refining, ensure the `planner_performance` metric (currently `np.mean(episode_rewards)`) is meaningful. It should represent a cost (e.g., average total travel distance) that the planner aims to minimize. This will depend on the actual reward function implemented in `RegretOracle`.
+    *   **Redefine `acl_threshold`:** The `acl_threshold` should be interpreted as a target performance value. If the `planner_performance` (e.g., average total travel distance) falls *below* this threshold, it indicates good performance.
+    *   **Design Multi-Parameter Update Strategy:** When the planner's performance meets the `acl_threshold`, adjust *multiple* difficulty parameters simultaneously. For example:
+        *   Increase `lambda` (more frequent demands).
+        *   Increase `demand_spatial_spread` (demands are more spread out).
+        *   Ensure these adjustments are gradual and progressive to maintain a smooth learning curve.
+    *   *(Important: The specific values for `acl_threshold` and the exact update rules will require tuning once the planner and reward function are more developed。）*

@@ -11,10 +11,11 @@ class EnvConfig:
 
 @dataclass
 class GeneratorConfig:
-    # TODO: acl_threshold is a parameter to determine when to increase difficulty, this is related to the output metric of the planner.
     acl_threshold: float
-    # TODO: this should be designed and talked about.
     initial_difficulty: Dict[str, float]
+    min_demand_quantity: int
+    max_demand_quantity: int
+
 
 @dataclass
 class PlannerConfig:

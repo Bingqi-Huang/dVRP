@@ -1,114 +1,78 @@
-"""
-Planner Agent: Routes vehicles to serve demands.
-Currently uses a simple greedy heuristic.
-TODO: Replace with learned policy (e.g., attention-based model).
-"""
-import numpy as np
-import math
-from typing import Dict, List
+import torch
+import torch.optim as optim
+from torch.distributions import Categorical # Example distribution
 
-from utils.data_structures import GlobalState, PlannerAction
-
+from model.planner_model import PlannerModel
+from utils.replay_buffer import ReplayBuffer
+from utils.config import PlannerConfig, ModelConfig
+from utils.data_structures import State
 
 class PlannerAgent:
     """
-    The planner agent that decides vehicle routes.
-    Goal: Minimize operational cost and failed demands.
-    
-    Current Implementation: Greedy nearest-neighbor heuristic
-    TODO: Replace with neural network policy (AM/POMO style)
+    TODO: This is the RL agent logic based on our planner model.
+    Implements the RL agent logic (e.g., PPO). It uses the PlannerModel
+    to make decisions and learns by updating the model's weights.
     """
-    
-    def __init__(self):
-        """Initialize the planner agent."""
-        # TODO: The actual model (e.g., Dynamic Encoder + Rolling Decoder) would be defined here.
-        self.model = None 
-        self.optimizer = None
+    def __init__(self, planner_config: PlannerConfig, model_config: ModelConfig):
+        self.config = planner_config
+        
+        # Initialize the model and optimizer
+        self.model = PlannerModel(model_config)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.config.lr)
+        
+        # Initialize the replay buffer for on-policy learning
+        self.buffer = ReplayBuffer()
 
-    # TODO: Get responses from a planner model(network), here is a dummy implementation. 
-    # We are supposed to have multiple planner other than our own, used as baseline.
-    def choose_action(self, state: GlobalState) -> PlannerAction:
+    def choose_action(self, state: State):
         """
-        Choose routing action for all vehicles.
-        
-        Uses greedy heuristic:
-        - Each vehicle serves its nearest unassigned demand
-        - If vehicle is full, return to depot first
-        
-        Args:
-            state: Current global state
-            
-        Returns:
-            PlannerAction with vehicle plans
+        Selects an action based on the current state observation.
         """
-        # Simple greedy assignment: nearest demand to each vehicle
-        routes = {}
-        assigned_demands = set()
+        # Note: In a real implementation, the 'state' object would be
+        # pre-processed into a tensor before being passed to the model.
         
-        for vehicle in state.vehicles:
-            if vehicle.remaining_capacity <= 0:
-                # Vehicle is full, needs to return to depot
-                routes[vehicle.id] = []  # Empty plan = return to depot
-                continue
-            
-            # Find nearest unassigned demand
-            nearest_demand = None
-            nearest_dist = float('inf')
-            
-            for demand in state.pending_demands:
-                if demand.id in assigned_demands:
-                    continue
-                
-                # Check if vehicle can handle this demand
-                if demand.quantity > vehicle.remaining_capacity:
-                    continue
-                
-                # Calculate distance
-                dist = self._euclidean_distance(vehicle.location, demand.location)
-                
-                if dist < nearest_dist:
-                    nearest_dist = dist
-                    nearest_demand = demand
-            
-            # Assign nearest demand to vehicle
-            if nearest_demand is not None:
-                routes[vehicle.id] = [nearest_demand.id]
-                assigned_demands.add(nearest_demand.id)
-            else:
-                routes[vehicle.id] = []
+        with torch.no_grad():
+            action_logits, state_value = self.model(state)
         
-        # FIXED: Use 'vehicle_plans' instead of 'vehicle_routes'
-        action = PlannerAction(vehicle_plans=routes)
-        return action
-    
-    def _euclidean_distance(self, loc1, loc2):
-        """Calculate Euclidean distance between two locations."""
-        return np.sqrt((loc1[0] - loc2[0])**2 + (loc1[1] - loc2[1])**2)
-    
-    def save(self, filepath: str):
-        """
-        Save planner policy.
+        # Create a probability distribution from the logits.
+        # This is a placeholder for a more complex action space.
+        dist = Categorical(logits=action_logits)
         
-        TODO: Implement when neural network is added
-        """
-        # Placeholder for future neural network implementation
-        import pickle
-        with open(filepath, 'wb') as f:
-            pickle.dump({'type': 'greedy'}, f)
-    
-    def load(self, filepath: str):
-        """
-        Load planner policy.
+        # Sample an action from the distribution
+        action = dist.sample()
+        action_log_prob = dist.log_prob(action)
         
-        TODO: Implement when neural network is added
-        """
-        # Placeholder for future neural network implementation
-        pass
+        # The returned 'action' here is just a tensor. It will need to be
+        # decoded into a meaningful plan for the environment's step function.
+        return action, action_log_prob, state_value
 
-    def update(self, reward: float, log_prob: float):
+    def store_transition(self, state, action_log_prob, reward, done, value):
+        """Stores an experience tuple in the replay buffer."""
+        self.buffer.store(state, action_log_prob, reward, done, value)
+
+    def update_policy(self):
         """
-        Updates the model's policy. The goal is to MINIMIZE regret, which means
-        minimizing the reward signal from the environment (-delta_regret).
+        Updates the policy using the experiences collected in the buffer.
+        This is a placeholder for the actual PPO update logic.
         """
-        # Standard policy gradient update, e.g., loss = -log_prob * reward
-        pass
+        if len(self.buffer) == 0:
+            print("Buffer is empty, skipping policy update.")
+            return
+
+        print(f"Updating policy with {len(self.buffer)} transitions...")
+        
+        # In a real PPO implementation, you would:
+        # 1. Get data from the buffer
+        # 2. Calculate advantages (e.g., GAE)
+        # 3. Loop for PPO_EPOCHS and update the model
+        
+        # For now, we just clear the buffer as is required for on-policy algorithms.
+        self.buffer.clear()
+        print("Policy update placeholder finished and buffer cleared.")
+
+    def save_model(self, path: str):
+        """Saves the model weights."""
+        torch.save(self.model.state_dict(), path)
+
+    def load_model(self, path: str):
+        """Loads the model weights."""
+        self.model.load_state_dict(torch.load(path))

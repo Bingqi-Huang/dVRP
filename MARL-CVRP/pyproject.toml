@@ -1,0 +1,15 @@
+[project]
+name = "marl-cvrp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10.7",
+    "numpy>=2.3.4",
+    "pyyaml>=6.0.3",
+    "torch>=2.9.0",
+]
+
+[tool.setuptools]
+packages = ["agents", "env", "model", "utils"]

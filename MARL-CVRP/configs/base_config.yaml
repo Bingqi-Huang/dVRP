@@ -1,0 +1,38 @@
+seed: 42
+device: "cuda"
+
+env:
+  sim_duration: 480 # Assuming one day with 480 minutes (8 hours)
+  n_vehicles: 5
+  vehicle_capacity: 50
+  map_size: 100
+
+# Generator settings
+generator:
+  # TODO： This threshold value MUST be tune based on actual planner performance metrics.
+  acl_threshold: 0.1 # Example threshold for difficulty update
+  # TODO: Design this difficulty representation based on actual environment parameters.
+  initial_difficulty:
+    lambda: 0.1 # Example: demand arrival rate (poisson)
+
+# Planner Agent settings
+planner:
+  lr: 0.0001
+  gamma: 0.99
+  gae_lambda: 0.95
+  ppo_clip: 0.2
+  ppo_epochs: 10
+  batch_size: 128
+
+# Model settings
+model:
+  embedding_dim: 128
+  n_heads: 8
+  n_layers: 3
+  hidden_dim: 512
+
+# Training settings
+training:
+  num_acl_updates: 10
+  script_batch_size: 50
+  log_interval: 10
